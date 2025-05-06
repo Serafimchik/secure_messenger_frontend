@@ -9,11 +9,11 @@ function ChatsScreen({ onLogout }) {
   const [newMessage, setNewMessage] = useState('');
   const [newChatEmail, setNewChatEmail] = useState('');
   const [chatError, setChatError] = useState('');
-  const [messageError, setMessageError] = useState('');
   const [loading, setLoading] = useState(true);
   const socketRef = useRef(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const lastMessageRef = useRef(null);
+  const selectedChatRef = useRef(null);
 
   const fetchChats = async () => {
     try {
@@ -32,44 +32,7 @@ function ChatsScreen({ onLogout }) {
     }
   };
 
-  const connectWebSocket = useCallback(() => {
-    const token = localStorage.getItem('token');
-    const ws = new WebSocket(`ws://localhost:8080/ws?token=${encodeURIComponent(token)}`);
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ event: 'auth', token }));
-    };
-
-    ws.onmessage = (e) => {
-      const message = JSON.parse(e.data);
-      console.log("Получено сообщение по WebSocket:", message);
-
-      if (message.event === 'new_message') {
-        const data = typeof message.data === 'string' ? JSON.parse(message.data) : message.data;
-        if (+data.sender_id === +currentUserId && !data.username) {
-          data.username = 'Вы';
-        }
-
-        if (+data.chat_id === selectedChat?.id) {
-          setMessages((prev) => [...prev, data]);
-        }
-      }
-
-      if (message.event === 'new_chat') {
-        fetchChats();
-      }
-
-      if (message.event === 'error') {
-        console.error("WebSocket ошибка:", message.data?.message);
-      }
-    };
-
-    ws.onerror = () => {
-      console.error('Ошибка WebSocket соединения');
-    };
-
-    socketRef.current = ws;
-  }, [currentUserId, selectedChat]);
+  const currentUserIdRef = useRef(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -77,16 +40,107 @@ function ChatsScreen({ onLogout }) {
       try {
         const decoded = jwtDecode(token);
         setCurrentUserId(decoded.user_id);
+        currentUserIdRef.current = decoded.user_id;  
+        fetchChats();
+        connectWebSocket();
+      } catch (e) {
+        console.error("Ошибка декодирования токена", e);
+      }
+    }
+  
+    return () => socketRef.current?.close();
+  }, []);
+  
+  const connectWebSocket = useCallback(() => {
+    const token = localStorage.getItem('token');
+    const ws = new WebSocket(`ws://localhost:8080/ws?token=${encodeURIComponent(token)}`);
+  
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ event: 'auth', token }));
+    };
+  
+    ws.onmessage = (e) => {
+      const message = JSON.parse(e.data);
+  
+      if (message.event === 'new_message') {
+        const data = typeof message.data === 'string' ? JSON.parse(message.data) : message.data;
+        data.id = data.message_id;
+      
+        if (+data.sender_id === +currentUserIdRef.current && !data.username) {
+          data.username = 'Вы';
+        }
+      
+        if (+data.chat_id === selectedChatRef.current?.id) {
+          setMessages((prev) => [...prev, data]);
+      
+          if (+data.sender_id !== +currentUserIdRef.current) {
+            sendReadReceipt(data.chat_id, data.message_id);
+          }
+        } else {
+          setChats(prevChats =>
+            prevChats.map(chat =>
+              +chat.id === +data.chat_id
+                ? { ...chat, unread_count: (chat.unread_count || 0) + 1 }
+                : chat
+            )
+          );
+        }
+      }
+  
+      if (message.event === 'new_chat') {
+        fetchChats();
+      }
+  
+      if (message.event === 'message_read') {
+        const { chat_id, message_ids, read_at } = message.data;
+      
+        if (!Array.isArray(message_ids) || !read_at) {
+          console.warn("Некорректные данные в message_read:", message.data);
+          return;
+        }   
+        const currentSelected = selectedChatRef.current;
+         
+        if (+chat_id === +currentSelected?.id) {   
+          const messageIdSet = new Set(message_ids.map(String));      
+          setMessages(prevMessages => {
+            const updatedMessages = prevMessages.map(msg => {
+              if (messageIdSet.has(String(msg.id))) {
+                return { ...msg, read_at }; 
+              }
+              return msg;
+            });
+            return [...updatedMessages];
+          });
+        }
+      }
+  
+      if (message.event === 'error') {
+        console.error("WebSocket ошибка:", message.data?.message);
+      }
+    };
+  
+    ws.onerror = () => {
+      console.error('Ошибка WebSocket соединения');
+    };
+  
+    socketRef.current = ws;
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const decoded = jwtDecode(token);
+        setCurrentUserId(decoded.user_id);        
+        fetchChats();
+        connectWebSocket();
       } catch (e) {
         console.error("Ошибка декодирования токена", e);
       }
     }
 
-    fetchChats();
-    connectWebSocket();
-
     return () => socketRef.current?.close();
-  }, [connectWebSocket]);
+  }, []);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -108,45 +162,133 @@ function ChatsScreen({ onLogout }) {
         name: null,
       }),
     };
-    socketRef.current.send(JSON.stringify(payload));
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(payload));
+    } else {
+      console.warn("WebSocket еще не подключен — создание чата отменено");
+    }
     setNewChatEmail('');
   };
 
-  const fetchMessages = async (chatId) => {
+  const fetchMessages = async (chatId, limit = 20) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:8080/api/chats/${chatId}?page=1&limit=20`, {
+      const res = await fetch(`http://localhost:8080/api/chats/${chatId}?limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
       const sortedMessages = [...data.messages].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
       setMessages(sortedMessages);
-      setMessageError('');
     } catch {
       setMessages([]);
-      setMessageError('Не удалось загрузить сообщения');
     }
   };
 
   const handleSendMessage = () => {
     if (!newMessage.trim() || !selectedChat) return;
-    socketRef.current.send(
-      JSON.stringify({
-        event: 'send_message',
-        chat_id: selectedChat.id,
-        content: newMessage,
-      })
-    );
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          event: 'send_message',
+          chat_id: selectedChat.id,
+          content: newMessage,
+        })
+      );
+    } else {
+      console.warn("WebSocket еще не подключен — сообщение не отправлено");
+    }
     setNewMessage('');
   };
 
   const selectChat = (chat) => {
     setSelectedChat(chat);
+    selectedChatRef.current = chat; 
     setMessages([]);
-    setMessageError('');
     fetchMessages(chat.id);
+    setChats(prevChats =>
+      prevChats.map(c =>
+        c.id === chat.id ? { ...c, unread_count: 0 } : c
+      )
+    );
   };
+
+  const sendReadReceipt = useCallback((chatId, lastReadMessageId) => {
+    return new Promise((resolve, reject) => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        const numericLastReadMessageId = Number(lastReadMessageId);
+  
+        if (isNaN(numericLastReadMessageId)) {
+          console.error("Некорректный lastReadMessageId:", lastReadMessageId);
+          return;
+        } 
+        socketRef.current.send(
+          JSON.stringify({
+            event: 'message_read',
+            chat_id: chatId,
+            content: JSON.stringify({
+              event: 'message_read',
+              data: {
+                chat_id: chatId,
+                last_read_message_id: numericLastReadMessageId, 
+              },
+            }),
+          })
+        );
+  
+        resolve(); 
+      } else {
+        reject(new Error("WebSocket соединение закрыто")); 
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = document.querySelector('.chat-messages');
+    if (!container) return;
+  
+    let isProcessingReadReceipt = false; 
+  
+    const handleScroll = () => {
+      if (!selectedChat || messages.length === 0) return;
+  
+      const unreadMessages = messages.filter(
+        msg => +msg.sender_id !== +currentUserId && !msg.read_at
+      );
+  
+      if (unreadMessages.length === 0) return;
+  
+      const isVisible = unreadMessages.some(msg => {
+        const messageElement = document.querySelector(`[data-message-id="${msg.id}"]`);
+        if (!messageElement) return false;
+        const rect = messageElement.getBoundingClientRect();
+        return rect.top >= 0 && rect.bottom <= window.innerHeight;
+      });
+  
+      if (isVisible && !isProcessingReadReceipt) {
+        isProcessingReadReceipt = true; 
+  
+        const lastUnreadMessage = unreadMessages[unreadMessages.length - 1];
+  
+        sendReadReceipt(selectedChat.id, lastUnreadMessage.id)
+          .then(() => {
+            setMessages(prevMessages =>
+              prevMessages.map(msg =>
+                msg.id === lastUnreadMessage.id
+                  ? { ...msg, read_at: new Date().toISOString() }
+                  : msg
+              )
+            );
+          })
+          .finally(() => {
+            isProcessingReadReceipt = false; 
+          });
+      }
+    };
+  
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [messages, selectedChat, currentUserId, sendReadReceipt]);
 
   return (
     <div className="chat-screen">
@@ -180,6 +322,9 @@ function ChatsScreen({ onLogout }) {
               >
                 <div className="chat-name">
                   {chat.name || `Чат #${chat.id}`}
+                  {chat.unread_count > 0 && (
+                    <span className="unread-badge">{chat.unread_count}</span>
+                  )}
                 </div>
                 {chat.last_message_content && (
                   <div className="chat-last-message">
@@ -204,28 +349,34 @@ function ChatsScreen({ onLogout }) {
               <h3>{selectedChat.name || `Чат #${selectedChat.id}`}</h3>
             </div>
             <div className="chat-messages">
-              {messages.length === 0 ? (
-                <div className="empty-chat">Ваша переписка пуста</div>
-              ) : (
-                messages.map((msg, i) => (
-                  <div
-                    key={i}
-                    ref={i === messages.length - 1 ? lastMessageRef : null}
-                    className={`chat-message ${+msg.sender_id === +currentUserId ? 'own-message' : ''}`}
-                  >
-                    <div className="message-header">
-                      <span className="sender-name">
-                        {+msg.sender_id === +currentUserId ? 'Вы' : msg.username || `Пользователь #${msg.sender_id}`}
-                      </span>
-                      <span className="message-time">
-                        {msg.sent_at ? new Date(msg.sent_at).toLocaleTimeString() : '...'}
-                      </span>
-                    </div>
-                    <div className="message-content">{msg.content}</div>
+              {messages.map((msg) => (
+                <div
+                  key={msg.id} 
+                  ref={msg.id === messages[messages.length - 1].id ? lastMessageRef : null}
+                  className={`chat-message ${+msg.sender_id === +currentUserId ? 'own-message' : ''}`}
+                  data-message-id={msg.id}
+                >
+                  <div className="message-header">
+                    <span className="sender-name">
+                      {+msg.sender_id === +currentUserId ? 'Вы' : msg.username || `Пользователь #${msg.sender_id}`}
+                    </span>
+                    <span className="message-time">
+                      {msg.sent_at ? new Date(msg.sent_at).toLocaleTimeString() : '...'}
+                      {+msg.sender_id === +currentUserId && (
+                        <span
+                          className={`read-status ${msg.read_at ? 'read' : 'delivered'}`}
+                          style={{ color: msg.read_at ? 'blue' : 'gray' }}
+                        >
+                          ✔✔
+                        </span>
+                      )}
+                    </span>
                   </div>
-                ))
-              )}
+                  <div className="message-content">{msg.content}</div>
+                </div>
+              ))}
             </div>
+
             <div className="chat-input">
               <input
                 type="text"

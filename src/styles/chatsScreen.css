@@ -189,3 +189,17 @@ body {
     align-self: flex-end;
   }
   
+  .unread-badge {
+    background-color: #e53935;
+    color: white;
+    border-radius: 12px;
+    padding: 2px 6px;
+    font-size: 12px;
+    margin-left: 8px;
+    font-weight: bold;
+  }
+    
+  .read-status.read {
+    color: #4fc3f7;
+  }
+  
