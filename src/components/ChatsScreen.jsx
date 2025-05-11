@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { jwtDecode } from 'jwt-decode';
+import { importPublicKey, arrayBufferToBase64, decryptMessage } from '../utils/cryptoUtils';
+import { loadPrivateKey } from '../utils/indexedDB';
 import '../styles/chatsScreen.css';
 
 function ChatsScreen({ onLogout }) {
@@ -59,26 +61,50 @@ function ChatsScreen({ onLogout }) {
       ws.send(JSON.stringify({ event: 'auth', token }));
     };
   
-    ws.onmessage = (e) => {
+    ws.onmessage = async (e) => {
       const message = JSON.parse(e.data);
   
       if (message.event === 'new_message') {
         const data = typeof message.data === 'string' ? JSON.parse(message.data) : message.data;
         data.id = data.message_id;
       
-        if (+data.sender_id === +currentUserIdRef.current && !data.username) {
+        const isOwn = +data.sender_id === +currentUserIdRef.current;
+        const currentChatId = selectedChatRef.current?.id;
+      
+        if (isOwn && !data.username) {
           data.username = 'Вы';
         }
       
-        if (+data.chat_id === selectedChatRef.current?.id) {
+        try {
+          const privateKey = await loadPrivateKey();
+          const currentUserId = currentUserIdRef.current;
+      
+          if (privateKey) {
+            const content = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+            const block = content.encrypted_messages.find(b => +b.user_id === currentUserId);
+      
+            if (!block) {
+              data.content = '[Нет блока для пользователя]';
+            } else {
+              data.content = await decryptMessage(privateKey, block.payload);
+            }
+          } else {
+            data.content = '[Нет приватного ключа]';
+          }
+        } catch (e) {
+          console.warn('Ошибка при расшифровке сообщения по WebSocket:', e);
+          data.content = '[Ошибка расшифровки]';
+        }
+      
+        if (+data.chat_id === +currentChatId) {
           setMessages((prev) => [...prev, data]);
       
-          if (+data.sender_id !== +currentUserIdRef.current) {
+          if (!isOwn) {
             sendReadReceipt(data.chat_id, data.message_id);
           }
         } else {
-          setChats(prevChats =>
-            prevChats.map(chat =>
+          setChats((prevChats) =>
+            prevChats.map((chat) =>
               +chat.id === +data.chat_id
                 ? { ...chat, unread_count: (chat.unread_count || 0) + 1 }
                 : chat
@@ -86,7 +112,7 @@ function ChatsScreen({ onLogout }) {
           );
         }
       }
-  
+      
       if (message.event === 'new_chat') {
         fetchChats();
       }
@@ -176,31 +202,110 @@ function ChatsScreen({ onLogout }) {
       const res = await fetch(`http://localhost:8080/api/chats/${chatId}?limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+  
       if (!res.ok) throw new Error();
       const data = await res.json();
-      const sortedMessages = [...data.messages].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
-      setMessages(sortedMessages);
-    } catch {
+  
+      const sortedMessages = [...data.messages].sort(
+        (a, b) => new Date(a.sent_at) - new Date(b.sent_at)
+      );
+  
+      const privateKey = await loadPrivateKey();
+      const currentUserId = currentUserIdRef.current
+  
+      const decryptedMessages = await Promise.all(
+        sortedMessages.map(async (msg) => {
+          if (!privateKey) {
+            msg.content = '[Нет приватного ключа]';
+            return msg;
+          }
+  
+          try {
+            const content = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+            const block = content.encrypted_messages.find(b => +b.user_id === currentUserId);
+  
+            if (!block) {
+              msg.content = '[Нет блока для пользователя]';
+            } else {
+              const decrypted = await decryptMessage(privateKey, block.payload);
+              msg.content = decrypted;
+            }
+          } catch (e) {
+            console.warn(`Ошибка расшифровки сообщения (id: ${msg.id}):`, e);
+            msg.content = '[Ошибка дешифровки]';
+          }
+  
+          return msg;
+        })
+      );
+  
+      setMessages(decryptedMessages);
+    } catch (e) {
+      console.error('Ошибка при загрузке сообщений:', e);
       setMessages([]);
     }
   };
-
-  const handleSendMessage = () => {
+  
+   
+  const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
+    try {
+      const participants = selectedChat.participants;
+      const encryptedMessages = [];
+
+      const aesKey = await window.crypto.subtle.generateKey(
+        { name: "AES-GCM", length: 256 },
+        true,
+        ["encrypt", "decrypt"]
+      );
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const encodedMessage = new TextEncoder().encode(newMessage);
+      const ciphertext = await window.crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        aesKey,
+        encodedMessage
+      );
+      const rawAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
+      for (const participant of participants) {
+        if (!participant.public_key) {
+          console.warn(`Нет публичного ключа у участника с id ${participant.id}`);
+          continue;
+        }
+        try {
+          const publicKey = await importPublicKey(participant.public_key);
+          const encryptedKey = await window.crypto.subtle.encrypt(
+            { name: "RSA-OAEP" },
+            publicKey,
+            rawAesKey
+          );
+          encryptedMessages.push({
+            user_id: participant.id,
+            payload: {
+              encrypted_key: arrayBufferToBase64(encryptedKey),
+              iv: arrayBufferToBase64(iv),
+              ciphertext: arrayBufferToBase64(ciphertext),
+            },
+          });
+        } catch (err) {
+          console.error(`Ошибка шифрования для user_id=${participant.id}:`, err);
+        }
+      }
+      const encryptedContent = JSON.stringify({
+        encrypted_messages: encryptedMessages,
+      });
+      socketRef.current?.send(
         JSON.stringify({
           event: 'send_message',
           chat_id: selectedChat.id,
-          content: newMessage,
+          content: encryptedContent,
         })
       );
-    } else {
-      console.warn("WebSocket еще не подключен — сообщение не отправлено");
+      setNewMessage('');
+    } catch (error) {
+      console.error("Ошибка при отправке сообщения:", error);
     }
-    setNewMessage('');
   };
-
+  
   const selectChat = (chat) => {
     setSelectedChat(chat);
     selectedChatRef.current = chat; 
@@ -217,7 +322,6 @@ function ChatsScreen({ onLogout }) {
     return new Promise((resolve, reject) => {
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         const numericLastReadMessageId = Number(lastReadMessageId);
-  
         if (isNaN(numericLastReadMessageId)) {
           console.error("Некорректный lastReadMessageId:", lastReadMessageId);
           return;
@@ -235,7 +339,6 @@ function ChatsScreen({ onLogout }) {
             }),
           })
         );
-  
         resolve(); 
       } else {
         reject(new Error("WebSocket соединение закрыто")); 

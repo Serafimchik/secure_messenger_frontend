@@ -1,4 +1,4 @@
-import { savePrivateKey } from './indexedDB'; 
+import { savePrivateKey } from './indexedDB';
 
 export async function generateKeyPair() {
   const keyPair = await window.crypto.subtle.generateKey(
@@ -11,11 +11,14 @@ export async function generateKeyPair() {
     true,
     ["encrypt", "decrypt"]
   );
+  const publicKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+  await savePrivateKey(keyPair.privateKey);
+  const publicKeyBase64 = jwkToBase64(publicKeyJwk);
+  return publicKeyBase64;
+}
 
-  const publicKey = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
-  const privateKey = await window.crypto.subtle.exportKey("jwk", keyPair.privateKey);
-
-  await savePrivateKey(privateKey);
-
-  return publicKey;
+function jwkToBase64(jwk) {
+  const json = JSON.stringify(jwk);
+  const base64 = btoa(json);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); 
 }
