@@ -16,7 +16,7 @@ function RegisterScreen({ onBack }) {
       username, 
       email, 
       password, 
-      public_key: publicKey.n 
+      public_key: publicKey, 
     };
   
     try {
