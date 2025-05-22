@@ -1,6 +1,9 @@
 import { savePrivateKey } from './indexedDB';
 
 export async function generateKeyPair() {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('Web Crypto API недоступен');
+  }
   const keyPair = await window.crypto.subtle.generateKey(
     {
       name: "RSA-OAEP",

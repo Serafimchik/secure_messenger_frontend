@@ -1,42 +1,52 @@
-import { useState } from 'react';
-import { generateKeyPair } from '../utils/crypto';
+import React, { useState, useEffect } from 'react';
 
 function RegisterScreen({ onBack }) {
+  const [generateKeyPair, setGenerateKeyPair] = useState(null);
+  const [message, setMessage] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    import('../utils/crypto')
+      .then(mod => setGenerateKeyPair(() => mod.generateKeyPair))
+      .catch(() => setMessage('Ошибка загрузки криптографии'));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-  
-    const publicKey = await generateKeyPair();
 
-    const payload = { 
-      username, 
-      email, 
-      password, 
-      public_key: publicKey, 
-    };
-  
+    if (!generateKeyPair) {
+      setMessage('Загрузка криптографии...');
+      return;
+    }
+
     try {
+      const publicKey = await generateKeyPair();
+
+      const payload = {
+        username,
+        email,
+        password,
+        public_key: publicKey,
+      };
+
       const response = await fetch("/register", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-  
+
       const data = await response.json();
-  
+
       if (response.ok || response.status === 201) {
-        console.log('Регистрация успешна:', data);
         setMessage(`Успешно зарегистрирован! ID: ${data.user_id}`);
       } else {
         setMessage(data.message || 'Ошибка регистрации');
       }
     } catch (error) {
-      console.error('Ошибка при регистрации:', error);
-      setMessage('Сервер недоступен или ошибка сети');
+      console.error(error);
+      setMessage('Ошибка генерации ключа или сервер недоступен');
     }
   };
 
@@ -48,21 +58,21 @@ function RegisterScreen({ onBack }) {
           type="text"
           placeholder="Имя пользователя"
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onChange={e => setUsername(e.target.value)}
           required
         />
         <input
           type="email"
           placeholder="Электронная почта"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={e => setEmail(e.target.value)}
           required
         />
         <input
           type="password"
           placeholder="Пароль"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={e => setPassword(e.target.value)}
           required
         />
         <button type="submit" className="btn green">Зарегистрироваться</button>
