@@ -8,9 +8,13 @@ function RegisterScreen({ onBack }) {
   const [password, setPassword] = useState('');
 
   useEffect(() => {
-    import('../utils/crypto')
-      .then(mod => setGenerateKeyPair(() => mod.generateKeyPair))
-      .catch(() => setMessage('Ошибка загрузки криптографии'));
+    if (typeof window !== 'undefined' && window.crypto?.subtle) {
+      import('../utils/crypto')
+        .then(mod => setGenerateKeyPair(() => mod.generateKeyPair))
+        .catch(() => setMessage('Ошибка загрузки криптографии'));
+    } else {
+      setMessage('Web Crypto API недоступен в вашем браузере');
+    }
   }, []);
 
   const handleSubmit = async (e) => {
@@ -31,7 +35,7 @@ function RegisterScreen({ onBack }) {
         public_key: publicKey,
       };
 
-      const response = await fetch("/register", {
+      const response = await fetch('/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
