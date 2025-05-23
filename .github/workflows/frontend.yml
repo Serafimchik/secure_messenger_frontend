@@ -42,20 +42,7 @@ jobs:
           envs: IMAGE_NAME,REGISTRY,GITHUB_SHA,CONTAINER_NAME
           script: |
             TAG_NAME=$(echo $GITHUB_SHA | head -c7)
-
-            echo "Stop & Remove old container"
+            docker login -u ${{ secrets.REGISTRY_USERNAME }} -p ${{ secrets.REGISTRY_PASSWORD }} $REGISTRY
             docker stop $CONTAINER_NAME || true
             docker rm $CONTAINER_NAME || true
-
-            echo "Renew SSL cert if needed"
-            docker compose -f /opt/secure-messenger/docker-compose.yml run --rm certbot
-            docker compose -f /opt/secure-messenger/docker-compose.yml exec nginx nginx -s reload
-
-            echo "Start new frontend container"
-            docker login -u ${{ secrets.REGISTRY_USERNAME }} -p ${{ secrets.REGISTRY_PASSWORD }} $REGISTRY
-            docker run -d \
-              --name $CONTAINER_NAME \
-              --network secure-messenger-network \
-              -p 80:80 \
-              -p 443:443 \
-              $REGISTRY/$IMAGE_NAME:$TAG_NAME
+            docker run -d --name $CONTAINER_NAME --network secure-messenger-network -p 80:80 -p 443:443 $REGISTRY/$IMAGE_NAME:$TAG_NAME
