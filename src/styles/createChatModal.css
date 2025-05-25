@@ -1,0 +1,125 @@
+/* Затемнение фона */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 50;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  /* Модальное окно */
+  .modal-content {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 24px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  }
+  
+  /* Заголовок */
+  .modal-content h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  
+  /* Переключатели чата */
+  .chat-type-buttons {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  
+  .chat-type-buttons button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 999px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+  }
+  
+  .chat-type-buttons .selected {
+    background-color: #2563eb;
+    color: white;
+  }
+  
+  .chat-type-buttons .unselected {
+    background-color: #e5e7eb;
+    color: #333;
+  }
+  
+  /* Поля ввода */
+  .modal-content input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    outline: none;
+  }
+  
+  .participant-input {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  
+  .participant-input input {
+    flex: 1;
+  }
+  
+  /* Список участников */
+  .participant-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px;
+  }
+  
+  .participant-list li {
+    background: #f3f4f6;
+    border-radius: 8px;
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  
+  .participant-list button {
+    background: none;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+  
+  /* Кнопки действий */
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  
+  .modal-actions button {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+  }
+  
+  .modal-actions .cancel-btn {
+    background-color: #e5e7eb;
+    color: #333;
+  }
+  
+  .modal-actions .create-btn {
+    background-color: #2563eb;
+    color: white;
+  }
+  

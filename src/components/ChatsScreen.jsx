@@ -3,24 +3,28 @@ import { jwtDecode } from 'jwt-decode';
 import { importPublicKey, arrayBufferToBase64, decryptMessage } from '../utils/cryptoUtils';
 import { loadPrivateKey } from '../utils/indexedDB';
 import '../styles/chatsScreen.css';
+import GroupChatParticipants from './GroupChatParticipants';
+import CreateChatModal from './CreateChatModal';
 
 function ChatsScreen({ onLogout }) {
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [newChatEmail, setNewChatEmail] = useState('');
   const [chatError, setChatError] = useState('');
   const [loading, setLoading] = useState(true);
   const socketRef = useRef(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const lastMessageRef = useRef(null);
   const selectedChatRef = useRef(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showParticipants, setShowParticipants] = useState(false);
+
 
   const fetchChats = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:8080/api/chats', {
+      const res = await fetch("/api/chats", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error();
@@ -34,6 +38,37 @@ function ChatsScreen({ onLogout }) {
     }
   };
 
+  const updateParticipants = async (chatId) => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`/api/chats/${chatId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      const updatedChat = await res.json();
+  
+      const hasCurrentUser = updatedChat.participants.some(
+        (p) => p.id === currentUserIdRef.current
+      );
+  
+      if (!hasCurrentUser) {
+        updatedChat.participants.push({
+          id: currentUserIdRef.current,
+          username: 'Вы',
+          email: '', 
+        });
+      }
+  
+      setSelectedChat(prev => ({
+        ...prev,
+        participants: updatedChat.participants
+      }));
+      
+    } catch (e) {
+      console.warn('Не удалось обновить список участников:', e);
+    }
+  };
+    
   const currentUserIdRef = useRef(null);
 
   useEffect(() => {
@@ -139,7 +174,14 @@ function ChatsScreen({ onLogout }) {
           });
         }
       }
-  
+
+      if (message.event === 'participant_added' || message.event === 'participant_removed') {
+        const chatId = message.data?.chat_id;      
+        if (selectedChatRef.current?.id === chatId) {
+          updateParticipants(chatId);
+        }
+      }
+    
       if (message.event === 'error') {
         console.error("WebSocket ошибка:", message.data?.message);
       }
@@ -174,32 +216,36 @@ function ChatsScreen({ onLogout }) {
     }
   }, [messages]);
 
-  const handleCreateChat = () => {
-    if (!newChatEmail.match(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)) {
-      setChatError('Введите корректный email');
+  const handleCreateChat = ({ type, emails, name }) => {
+    const allValid = emails.every(email =>
+      email.match(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)
+    );
+    if (!allValid) {
+      setChatError('Введите корректные email-адреса');
       return;
     }
     const payload = {
       event: 'create_chat',
       chat_id: 0,
       content: JSON.stringify({
-        recipient_email: newChatEmail,
-        type: 'direct',
-        name: null,
+        type,
+        name: type === 'group' ? name : undefined,
+        recipient_email: type === 'direct' ? emails[0] : undefined,
+        emails: type === 'group' ? emails : undefined,
       }),
-    };
+    };  
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(payload));
     } else {
-      console.warn("WebSocket еще не подключен — создание чата отменено");
+      console.warn('WebSocket ещё не подключен — создание чата отменено');
     }
-    setNewChatEmail('');
+    setIsModalOpen(false);
   };
-
+  
   const fetchMessages = async (chatId, limit = 20) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:8080/api/chats/${chatId}?limit=${limit}`, {
+      const res = await fetch(`/api/chats/${chatId}?limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
   
@@ -393,6 +439,55 @@ function ChatsScreen({ onLogout }) {
     return () => container.removeEventListener('scroll', handleScroll);
   }, [messages, selectedChat, currentUserId, sendReadReceipt]);
 
+  const handleAddParticipant = async (email) => {
+    if (!selectedChat) return;
+  
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`/api/chats/${selectedChat.id}/participants`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email }),
+      });
+  
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || 'Ошибка при добавлении участника');
+      }
+  
+    } catch (err) {
+      console.error('Ошибка при добавлении участника:', err.message);
+    }
+  };
+  
+  const handleRemoveParticipant = async (userId) => {
+    if (!selectedChat) return;
+  
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`/api/chats/${selectedChat.id}/participants`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      
+  
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || 'Ошибка при удалении участника');
+      }
+
+    } catch (err) {
+      console.error('Ошибка при удалении участника:', err.message);
+    }
+  };
+  
   return (
     <div className="chat-screen">
       <aside className="sidebar">
@@ -400,17 +495,14 @@ function ChatsScreen({ onLogout }) {
           <h2>Мои чаты</h2>
           <button onClick={onLogout} className="logout-btn">Выйти</button>
         </div>
-
         <div className="new-chat-form">
-          <input
-            type="email"
-            placeholder="Email собеседника"
-            value={newChatEmail}
-            onChange={(e) => setNewChatEmail(e.target.value)}
-          />
-          <button onClick={handleCreateChat} className="btn green">Создать</button>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="btn green w-full"
+          >
+            Создать чат
+          </button>
         </div>
-
         {loading ? (
           <div className="empty-chat">Загрузка чатов...</div>
         ) : chatError ? (
@@ -421,7 +513,10 @@ function ChatsScreen({ onLogout }) {
               <li
                 key={chat.id}
                 className="chat-item"
-                onClick={() => selectChat(chat)}
+                onClick={() => {
+                  selectChat(chat);
+                  setShowParticipants(false); 
+                }}
               >
                 <div className="chat-name">
                   {chat.name || `Чат #${chat.id}`}
@@ -442,19 +537,37 @@ function ChatsScreen({ onLogout }) {
           </ul>
         )}
       </aside>
-
       <section className="chat-area">
         {!selectedChat ? (
           <div className="empty-chat">Выберите чат для отображения сообщений</div>
         ) : (
           <div className="chat-window">
             <div className="chat-header">
-              <h3>{selectedChat.name || `Чат #${selectedChat.id}`}</h3>
-            </div>
+              <div className="chat-title">
+                <h3>{selectedChat.name || `Чат #${selectedChat.id}`}</h3>
+                {selectedChat.type === 'group' && (
+                  <button
+                    onClick={() => setShowParticipants((prev) => !prev)}
+                    className="participants-toggle-btn"
+                    title="Участники чата"
+                  >
+                    👥
+                  </button>
+                )}
+              </div>
+              {selectedChat.type === 'group' && showParticipants && (
+                <GroupChatParticipants
+                  participants={selectedChat?.participants || []}
+                  currentUserId={currentUserId}
+                  onAdd={handleAddParticipant}
+                  onRemove={handleRemoveParticipant}
+                />
+              )}
+            </div> 
             <div className="chat-messages">
               {messages.map((msg) => (
                 <div
-                  key={msg.id} 
+                  key={msg.id}
                   ref={msg.id === messages[messages.length - 1].id ? lastMessageRef : null}
                   className={`chat-message ${+msg.sender_id === +currentUserId ? 'own-message' : ''}`}
                   data-message-id={msg.id}
@@ -479,24 +592,26 @@ function ChatsScreen({ onLogout }) {
                 </div>
               ))}
             </div>
-
             <div className="chat-input">
               <input
                 type="text"
-                placeholder="Введите сообщение"
+                placeholder="Введите сообщение..."
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
               />
-              <button onClick={handleSendMessage} className="btn send-btn">
-                Отправить
-              </button>
+              <button onClick={handleSendMessage}>Отправить</button>
             </div>
           </div>
         )}
       </section>
+      <CreateChatModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onCreate={handleCreateChat}
+      />
     </div>
-  );
+  );  
 }
 
 export default ChatsScreen;

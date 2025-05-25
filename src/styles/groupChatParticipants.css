@@ -1,0 +1,71 @@
+.participants-panel {
+    border: 1px solid #ccc;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 10px;
+    background-color: #f8f8f8;
+  }
+  
+  .participants-panel h4 {
+    margin: 0 0 8px;
+  }
+  
+  .participants-list {
+    list-style: none;
+    padding: 0;
+    margin-bottom: 10px;
+  }
+  
+  .participant-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px dashed #ccc;
+  }
+  
+  .remove-btn {
+    background-color: #e53935;
+    color: white;
+    border: none;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  
+  .remove-btn:hover {
+    background-color: #c62828;
+  }
+  
+  .add-participant {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  
+  .add-participant input {
+    flex-grow: 1;
+    padding: 4px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  
+  .add-participant button {
+    background-color: #43a047;
+    color: white;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .add-participant button:hover {
+    background-color: #388e3c;
+  }
+  
+  .error-text {
+    color: red;
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+  
