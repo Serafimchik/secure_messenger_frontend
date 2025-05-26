@@ -90,7 +90,8 @@ function ChatsScreen({ onLogout }) {
   
   const connectWebSocket = useCallback(() => {
     const token = localStorage.getItem('token');
-    const ws = new WebSocket(`ws://localhost:8080/ws?token=${encodeURIComponent(token)}`);
+    const host = window.location.host;
+    const ws = new WebSocket(`ws://${host}/ws?token=${encodeURIComponent(token)}`);
   
     ws.onopen = () => {
       ws.send(JSON.stringify({ event: 'auth', token }));
