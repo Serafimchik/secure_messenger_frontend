@@ -19,6 +19,7 @@ function ChatsScreen({ onLogout }) {
   const selectedChatRef = useRef(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
 
 
   const fetchChats = async () => {
@@ -218,7 +219,7 @@ function ChatsScreen({ onLogout }) {
     }
   }, [messages]);
 
-  const handleCreateChat = ({ type, emails, name }) => {
+  const handleCreateChat = async ({ type, emails, name }) => {
     const allValid = emails.every(email =>
       email.match(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)
     );
@@ -226,22 +227,70 @@ function ChatsScreen({ onLogout }) {
       setChatError('Введите корректные email-адреса');
       return;
     }
-    const payload = {
-      event: 'create_chat',
-      chat_id: 0,
-      content: JSON.stringify({
-        type,
-        name: type === 'group' ? name : undefined,
-        recipient_email: type === 'direct' ? emails[0] : undefined,
-        emails: type === 'group' ? emails : undefined,
-      }),
-    };  
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(payload));
-    } else {
-      console.warn('WebSocket ещё не подключен — создание чата отменено');
+    const token = localStorage.getItem('token');
+    const allEmails = [...new Set([...emails])];
+    try {
+      const response = await fetch('/api/users/public-keys', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ emails: allEmails }),
+      });
+      const data = await response.json();
+      const publicKeys = data.keys;
+      const aesKey = await window.crypto.subtle.generateKey(
+        { name: "AES-GCM", length: 256 },
+        true,
+        ["encrypt", "decrypt"]
+      );
+      const exportedAES = await window.crypto.subtle.exportKey("raw", aesKey);
+      const encryptedKeys = await Promise.all(
+        publicKeys.map(async ({ email, public_key }) => {
+          const jwk = JSON.parse(atob(public_key));
+          const importedKey = await window.crypto.subtle.importKey(
+            "jwk",
+            jwk,
+            { name: "RSA-OAEP", hash: "SHA-256" },
+            true,
+            ["encrypt"]
+          );
+          const encryptedKey = await window.crypto.subtle.encrypt(
+            { name: "RSA-OAEP" },
+            importedKey,
+            exportedAES
+          );
+          return {
+            email,
+            encrypted_key: btoa(String.fromCharCode(...new Uint8Array(encryptedKey)))
+          };
+        })
+      );
+  
+      const payload = {
+        event: 'create_chat',
+        chat_id: 0,
+        content: JSON.stringify({
+          type,
+          name: type === 'group' ? name : undefined,
+          recipient_email: type === 'direct' ? emails[0] : undefined,
+          emails: type === 'group' ? emails : undefined,
+          encrypted_keys: encryptedKeys,
+        }),
+      };
+  
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify(payload));
+      } else {
+        console.warn('WebSocket ещё не подключен — создание чата отменено');
+      }
+  
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error('Ошибка при создании чата:', error);
+      setChatError('Не удалось создать чат. Попробуйте позже.');
     }
-    setIsModalOpen(false);
   };
   
   const fetchMessages = async (chatId, limit = 20) => {
