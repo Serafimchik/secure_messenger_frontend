@@ -454,13 +454,57 @@ function ChatsScreen({ onLogout }) {
   
     const token = localStorage.getItem('token');
     try {
+      let aesKey = aesKeysCache.current.get(selectedChat.id);
+      if (!aesKey) {
+        const chat = chats.find(c => c.id === selectedChat.id);
+        const encryptedKeyBase64 = chat?.encrypted_chat_key;
+        if (!encryptedKeyBase64) throw new Error('Зашифрованный AES-ключ не найден');
+        const encryptedKey = base64ToArrayBuffer(encryptedKeyBase64);
+        const privateKey = await loadPrivateKey();
+        const rawKey = await window.crypto.subtle.decrypt(
+          { name: "RSA-OAEP" },
+          privateKey,
+          encryptedKey
+        );
+        aesKey = await importAESKey(rawKey);
+        aesKeysCache.current.set(selectedChat.id, aesKey);
+      }
+      const exportedAES = await window.crypto.subtle.exportKey("raw", aesKey);
+      const resKeys = await fetch('/api/users/public-keys', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ emails: [email] }),
+      });
+      if (!resKeys.ok) throw new Error('Не удалось получить публичный ключ пользователя');
+      const { keys } = await resKeys.json();
+      const userKeyObj = keys.find(k => k.email === email);
+      if (!userKeyObj) throw new Error('Публичный ключ пользователя не найден');
+      const jwk = JSON.parse(atob(userKeyObj.public_key));
+      const importedPubKey = await window.crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        true,
+        ['encrypt']
+      );
+  
+      const encryptedAESKey = await window.crypto.subtle.encrypt(
+        { name: 'RSA-OAEP' },
+        importedPubKey,
+        exportedAES
+      );
+      const encrypted_key = btoa(String.fromCharCode(...new Uint8Array(encryptedAESKey)));
+
       const res = await fetch(`/api/chats/${selectedChat.id}/participants`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, encrypted_key }),
       });
   
       if (!res.ok) {

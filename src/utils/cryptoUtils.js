@@ -61,7 +61,7 @@ export async function importAESKey(rawKey) {
     "raw",
     rawKey,
     { name: "AES-GCM" },
-    false,
+    true,
     ["encrypt", "decrypt"]
   );
 }
