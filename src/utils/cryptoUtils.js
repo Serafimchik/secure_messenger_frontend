@@ -20,23 +20,11 @@ export async function importPublicKey(base64Key) {
   }
 }
       
-export async function decryptMessage(privateKey, payload) {
+export async function decryptMessageWithAESKey(aesKey, payload) {
   try {
-    const encryptedAesKey = base64ToArrayBuffer(payload.encrypted_key);
     const iv = base64ToArrayBuffer(payload.iv);
     const ciphertext = base64ToArrayBuffer(payload.ciphertext);
-    const rawAesKey = await window.crypto.subtle.decrypt(
-      { name: "RSA-OAEP" },
-      privateKey,
-      encryptedAesKey
-    );
-    const aesKey = await window.crypto.subtle.importKey(
-      "raw",
-      rawAesKey,
-      { name: "AES-GCM" },
-      false,
-      ["decrypt"]
-    );
+
     const decrypted = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv },
       aesKey,
@@ -44,25 +32,58 @@ export async function decryptMessage(privateKey, payload) {
     );
     return new TextDecoder().decode(decrypted);
   } catch (error) {
-    console.error("Ошибка при расшифровке:", error);
+    console.error("Ошибка при расшифровке сообщения с AES-ключом:", error);
     throw error;
   }
 }
-  
-export function exportKeyToBase64(key) {
-  return btoa(JSON.stringify(key));
+
+export function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
-function base64ToArrayBuffer(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+export function base64ToArrayBuffer(base64) {
+  const binary_string = atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
   }
   return bytes.buffer;
 }
-  
-export function arrayBufferToBase64(buffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+
+export async function importAESKey(rawKey) {
+  return await window.crypto.subtle.importKey(
+    "raw",
+    rawKey,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
-  
+
+export async function decryptAESMessage(encryptedContent, aesKey) {
+  try {
+    const { iv, ciphertext } =
+      typeof encryptedContent === 'string'
+        ? JSON.parse(encryptedContent)
+        : encryptedContent;
+    const ivBuffer = base64ToArrayBuffer(iv);
+    const ciphertextBuffer = base64ToArrayBuffer(ciphertext);
+
+    const decrypted = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(ivBuffer) },
+      aesKey,
+      ciphertextBuffer
+    );
+
+    return new TextDecoder().decode(decrypted);
+  } catch (err) {
+    console.error("Ошибка при расшифровке сообщения:", err);
+    return null;
+  }
+}
