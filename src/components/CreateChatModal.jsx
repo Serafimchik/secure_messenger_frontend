@@ -1,16 +1,15 @@
 import { useState } from 'react';
 import '../styles/createChatModal.css';
 
-
 export default function CreateChatModal({ isOpen, onClose, onCreate }) {
-    const [chatType, setChatType] = useState('private');
+    const [chatType, setChatType] = useState('direct');
     const [groupName, setGroupName] = useState('');
     const [email, setEmail] = useState('');
     const [participants, setParticipants] = useState([]);
     const [newParticipant, setNewParticipant] = useState('');
-  
+
     if (!isOpen) return null;
-  
+
     const handleAddParticipant = () => {
       const trimmed = newParticipant.trim();
       if (trimmed && !participants.includes(trimmed)) {
@@ -18,25 +17,27 @@ export default function CreateChatModal({ isOpen, onClose, onCreate }) {
         setNewParticipant('');
       }
     };
-  
+
     const handleRemoveParticipant = (emailToRemove) => {
       setParticipants(participants.filter((p) => p !== emailToRemove));
     };
-  
+
     const handleCreate = () => {
       if (chatType === 'direct' && email.trim()) {
         onCreate({ type: 'direct', emails: [email.trim()] });
       } else if (chatType === 'group' && groupName.trim() && participants.length > 0) {
         onCreate({ type: 'group', name: groupName.trim(), emails: participants });
+      } else if (chatType === 'channel' && groupName.trim()) {
+        onCreate({ type: 'channel', name: groupName.trim(), emails: participants });
       }
       onClose();
     };
-  
+
     return (
       <div className="modal-overlay">
         <div className="modal-content">
-          <h2>Создать чат</h2>
-  
+          <h2>Создать</h2>
+
           <div className="chat-type-buttons">
             <button
               onClick={() => setChatType('direct')}
@@ -50,9 +51,15 @@ export default function CreateChatModal({ isOpen, onClose, onCreate }) {
             >
               Групповой
             </button>
+            <button
+              onClick={() => setChatType('channel')}
+              className={chatType === 'channel' ? 'selected' : 'unselected'}
+            >
+              Канал
+            </button>
           </div>
-  
-          {chatType === 'direct' ? (
+
+          {chatType === 'direct' && (
             <>
               <label>Email пользователя</label>
               <input
@@ -62,16 +69,18 @@ export default function CreateChatModal({ isOpen, onClose, onCreate }) {
                 placeholder="example@example.com"
               />
             </>
-          ) : (
+          )}
+
+          {(chatType === 'group' || chatType === 'channel') && (
             <>
-              <label>Название группы</label>
+              <label>{chatType === 'channel' ? 'Название канала' : 'Название группы'}</label>
               <input
                 type="text"
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
-                placeholder="Название чата"
+                placeholder="Введите название"
               />
-  
+
               <label>Участники</label>
               <div className="participant-input">
                 <input
@@ -82,7 +91,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreate }) {
                 />
                 <button onClick={handleAddParticipant}>Добавить</button>
               </div>
-  
+
               <ul className="participant-list">
                 {participants.map((email) => (
                   <li key={email}>
@@ -93,7 +102,7 @@ export default function CreateChatModal({ isOpen, onClose, onCreate }) {
               </ul>
             </>
           )}
-  
+
           <div className="modal-actions">
             <button onClick={onClose} className="cancel-btn">Отмена</button>
             <button onClick={handleCreate} className="create-btn">Создать</button>
