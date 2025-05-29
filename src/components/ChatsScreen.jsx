@@ -5,6 +5,8 @@ import { loadPrivateKey } from '../utils/indexedDB';
 import '../styles/chatsScreen.css';
 import GroupChatParticipants from './GroupChatParticipants';
 import CreateChatModal from './CreateChatModal';
+import ChannelSearch from './ChannelSearch';
+import '../styles/channelSearch.css';
 
 function ChatsScreen({ onLogout }) {
   const [chats, setChats] = useState([]);
@@ -128,7 +130,7 @@ function ChatsScreen({ onLogout }) {
       console.warn('Не удалось обновить список участников:', e);
     }
   };
-      
+  
   const connectWebSocket = useCallback(() => {
     const token = localStorage.getItem('token');
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -254,7 +256,7 @@ function ChatsScreen({ onLogout }) {
     const token = localStorage.getItem('token');
     const allEmails = [...new Set([...emails])];
     try {
-      const response = await fetch('/api/users/public-keys', {
+      const response = fetch('/api/users/public-keys', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -262,15 +264,16 @@ function ChatsScreen({ onLogout }) {
         },
         body: JSON.stringify({ emails: allEmails }),
       });
-      const data = await response.json();
+      const data =  response.json();
       const publicKeys = data.keys;
-      const aesKey = await window.crypto.subtle.generateKey(
+      const aesKey = window.crypto.subtle.generateKey(
         { name: "AES-GCM", length: 256 },
         true,
         ["encrypt", "decrypt"]
       );
-      const exportedAES = await window.crypto.subtle.exportKey("raw", aesKey);
-      const encryptedKeys = await Promise.all(
+      const exportedAES = window.crypto.subtle.exportKey("raw", aesKey);
+      const exportedAESBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedAES)));
+      const encryptedKeys = Promise.all(
         publicKeys.map(async ({ email, public_key }) => {
           const jwk = JSON.parse(atob(public_key));
           const importedKey = await window.crypto.subtle.importKey(
@@ -292,30 +295,36 @@ function ChatsScreen({ onLogout }) {
         })
       );
   
+      const chatContent = {
+        type,
+        name: (type === 'group' || type === 'channel') ? name : undefined,
+        recipient_email: type === 'direct' ? emails[0] : undefined,
+        emails: (type === 'group' || type === 'channel') ? emails : undefined,
+        encrypted_keys: encryptedKeys,
+      };
+  
+      if (type === 'channel') {
+        chatContent.raw_aes_key = exportedAESBase64;
+      }
+  
       const payload = {
         event: 'create_chat',
         chat_id: 0,
-        content: JSON.stringify({
-          type,
-          name: type === 'group' ? name : undefined,
-          recipient_email: type === 'direct' ? emails[0] : undefined,
-          emails: type === 'group' ? emails : undefined,
-          encrypted_keys: encryptedKeys,
-        }),
+        content: JSON.stringify(chatContent),
       };
   
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify(payload));
       } else {
-        console.warn('WebSocket ещё не подключен — создание чата отменено');
+        console.warn('WebSocket ещё не подключен — создание отменено');
       }
   
       setIsModalOpen(false);
     } catch (error) {
-      console.error('Ошибка при создании чата:', error);
-      setChatError('Не удалось создать чат. Попробуйте позже.');
+      console.error('Ошибка при создании чата/канала:', error);
+      setChatError('Не удалось создать. Попробуйте позже.');
     }
-  };
+  };  
      
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
@@ -361,7 +370,7 @@ function ChatsScreen({ onLogout }) {
       console.error("Ошибка при отправке сообщения:", error);
     }
   };
-  
+    
   const selectChat = (chat) => {
     setSelectedChat(chat);
     selectedChatRef.current = chat; 
@@ -542,6 +551,52 @@ function ChatsScreen({ onLogout }) {
     }
   };
   
+  const handleJoinChannel = async (channelId) => {
+    try {
+      const res = await fetch(`/api/channels/${channelId}/join`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+  
+      if (res.ok) {
+        const updatedChat = await res.json();
+        setChats((prev) => [...prev, updatedChat]);
+      } else {
+        console.error('Не удалось подписаться на канал');
+      }
+    } catch (err) {
+      console.error('Ошибка при подписке на канал:', err);
+    }
+  }; 
+
+  const isChannel = selectedChat?.type === 'channel';
+  const isChannelOwner = selectedChat?.created_by === currentUserId; 
+  const canSendMessages = !isChannel || isChannelOwner;
+
+  const leaveChannel = async (chatId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/channels/${chatId}/leave`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+  
+      if (!res.ok) {
+        throw new Error('Не удалось отписаться от канала');
+      }
+      setChats(prev => prev.filter(c => c.id !== chatId));
+      setSelectedChat(null);
+      setMessages([]);
+    } catch (error) {
+      console.error('Ошибка при отписке от канала:', error);
+      alert('Ошибка при отписке от канала');
+    }
+  };
+  
   return (
     <div className="chat-screen">
       <aside className="sidebar">
@@ -554,9 +609,10 @@ function ChatsScreen({ onLogout }) {
             onClick={() => setIsModalOpen(true)}
             className="btn green w-full"
           >
-            Создать чат
+            Создать чат/канал
           </button>
         </div>
+        <ChannelSearch onJoin={handleJoinChannel} />
         {loading ? (
           <div className="empty-chat">Загрузка чатов...</div>
         ) : chatError ? (
@@ -608,6 +664,11 @@ function ChatsScreen({ onLogout }) {
                     👥
                   </button>
                 )}
+                {selectedChat?.type === 'channel' && (
+                  <button onClick={() => leaveChannel(selectedChat.id)} className="leave-button">
+                    Отписаться
+                  </button>
+                )}
               </div>
               {selectedChat.type === 'group' && showParticipants && (
                 <GroupChatParticipants
@@ -646,16 +707,18 @@ function ChatsScreen({ onLogout }) {
                 </div>
               ))}
             </div>
-            <div className="chat-input">
-              <input
-                type="text"
-                placeholder="Введите сообщение..."
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              />
-              <button onClick={handleSendMessage}>Отправить</button>
-            </div>
+            {canSendMessages && (
+              <div className="chat-input">
+                <input
+                  type="text"
+                  placeholder="Введите сообщение..."
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                />
+                <button onClick={handleSendMessage}>Отправить</button>
+              </div>
+            )}
           </div>
         )}
       </section>
