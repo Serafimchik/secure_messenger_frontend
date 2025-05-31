@@ -315,6 +315,11 @@ function ChatsScreen({ onLogout }) {
   
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify(payload));
+        console.log('Отправка через WebSocket:', {
+          event: 'create_chat',
+          chat_id: 0,
+          content: JSON.stringify(chatContent),
+        });
       } else {
         console.warn('WebSocket ещё не подключен — создание отменено');
       }
