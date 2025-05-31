@@ -256,7 +256,7 @@ function ChatsScreen({ onLogout }) {
     const token = localStorage.getItem('token');
     const allEmails = [...new Set([...emails])];
     try {
-      const response = fetch('/api/users/public-keys', {
+      const response = await fetch('/api/users/public-keys', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -264,16 +264,16 @@ function ChatsScreen({ onLogout }) {
         },
         body: JSON.stringify({ emails: allEmails }),
       });
-      const data =  response.json();
+      const data = await response.json();
       const publicKeys = data.keys;
-      const aesKey = window.crypto.subtle.generateKey(
+      const aesKey = await window.crypto.subtle.generateKey(
         { name: "AES-GCM", length: 256 },
         true,
         ["encrypt", "decrypt"]
       );
-      const exportedAES = window.crypto.subtle.exportKey("raw", aesKey);
+      const exportedAES = await window.crypto.subtle.exportKey("raw", aesKey);
       const exportedAESBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedAES)));
-      const encryptedKeys = Promise.all(
+      const encryptedKeys = await Promise.all(
         publicKeys.map(async ({ email, public_key }) => {
           const jwk = JSON.parse(atob(public_key));
           const importedKey = await window.crypto.subtle.importKey(
